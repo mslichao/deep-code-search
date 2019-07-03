@@ -13,7 +13,7 @@ import codecs
 from tqdm import tqdm
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(level=logging.INFO, format="%(thread)d,%(message)s")
 
 import torch
 from torch import optim
@@ -92,8 +92,8 @@ class CodeSearcher:
                                       self.conf['train_desc'],self.conf['desc_len'])
         
         data_loader = torch.utils.data.DataLoader(dataset=train_set, batch_size=self.conf['batch_size'], 
-                                           shuffle=True, drop_last=True, num_workers=1)
-        
+                                           shuffle=True, drop_last=True, num_workers=8)
+
         val_loss = {'loss': 1., 'epoch': 0}
 
         for epoch in range(self.conf['reload']+1, nb_epoch):          
@@ -107,7 +107,7 @@ class CodeSearcher:
                 loss.backward()
                 optimizer.step()
                 if itr % log_every ==0:
-                    logger.info('epo:[%d/%d] itr:%d Loss=%.5f'%(epoch, nb_epoch, itr, np.mean(losses)))
+                    logger.info('epo:[%d/%d] itr:%d/%d Loss=%.5f'%(epoch, nb_epoch, itr, len(data_loader), np.mean(losses)))
                     losses=[]
                 itr = itr + 1    
             

@@ -34,7 +34,7 @@ def get_config():
             'vocab_desc':'vocab.desc.pkl',
                     
         #training_params            
-            'batch_size': 12,
+            'batch_size': 2,
             'chunk_size':100000,
             'nb_epoch': 2000,
             'validation_split': 0.2,
@@ -46,7 +46,7 @@ def get_config():
                 'mode': 'all',
                 'top1': 0.4,
             },
-            'log_every': 100,
+            'log_every': 1,
             'save_every': 10,
             'reload':-1,#970,#epoch that the model is reloaded from . If reload=0, then train from scratch
         

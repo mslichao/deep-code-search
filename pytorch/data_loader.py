@@ -7,6 +7,7 @@ import json
 import random
 import numpy as np
 import pickle
+import os
 
 use_cuda = torch.cuda.is_available()
 
@@ -21,35 +22,19 @@ class CodeSearchDataset(data.Dataset):
     """
     def __init__(self, data_dir, f_name, name_len, f_api, api_len, 
                  f_tokens, tok_len, f_descs=None, desc_len=None):
+        self.data_dir=data_dir
+        self.f_name=f_name
         self.name_len=name_len
+        self.f_api=f_api
         self.api_len=api_len
+        self.f_tokens=f_tokens
         self.tok_len=tok_len
+        self.f_descs=f_descs
         self.desc_len=desc_len
-        # 1. Initialize file path or list of file names.
-        """read training data(list of int arrays) from a hdf5 file"""
-        self.training=False
-        print("loading data...")
-        table_name = tables.open_file(data_dir+f_name)
-        self.names = table_name.get_node('/phrases')
-        self.idx_names = table_name.get_node('/indices')
-        table_api = tables.open_file(data_dir+f_api)
-        self.apis = table_api.get_node('/phrases')
-        self.idx_apis = table_api.get_node('/indices')
-        table_tokens = tables.open_file(data_dir+f_tokens)
-        self.tokens = table_tokens.get_node('/phrases')
-        self.idx_tokens = table_tokens.get_node('/indices')
-        if f_descs is not None:
-            self.training=True
-            table_desc = tables.open_file(data_dir+f_descs)
-            self.descs = table_desc.get_node('/phrases')
-            self.idx_descs = table_desc.get_node('/indices')
-        
-        assert self.idx_names.shape[0] == self.idx_apis.shape[0]
-        assert self.idx_apis.shape[0] == self.idx_tokens.shape[0]
-        if f_descs is not None:
-            assert self.idx_names.shape[0]==self.idx_descs.shape[0]
-        self.data_len = self.idx_names.shape[0]
-        print("{} entries".format(self.data_len))
+
+        self.data_len=-1
+
+        self.reader_dict=dict()
         
     def pad_seq(self, seq, maxlen):
         if len(seq)<maxlen:
@@ -59,27 +44,61 @@ class CodeSearchDataset(data.Dataset):
             seq=seq[:maxlen]
         return seq
     
-    def __getitem__(self, offset):          
-        len, pos = self.idx_names[offset]['length'], self.idx_names[offset]['pos']
-        name = self.names[pos:pos + len].astype('int64')
+    def __getitem__(self, offset):         
+        reader = None
+        pid = os.getpid()
+        if not pid in self.reader_dict:
+            print(pid)
+            reader=dict()   
+
+            reader['training']=False
+            print("loading data...")
+            table_name = tables.open_file(self.data_dir+self.f_name)
+            reader['names'] = table_name.get_node('/phrases')
+            reader['idx_names'] = table_name.get_node('/indices')
+            table_api = tables.open_file(self.data_dir+self.f_api)
+            reader['apis'] = table_api.get_node('/phrases')
+            reader['idx_apis'] = table_api.get_node('/indices')
+            table_tokens = tables.open_file(self.data_dir+self.f_tokens)
+            reader['tokens'] = table_tokens.get_node('/phrases')
+            reader['idx_tokens'] = table_tokens.get_node('/indices')
+            if self.f_descs is not None:
+                reader['training']=True
+                table_desc = tables.open_file(self.data_dir+self.f_descs)
+                reader['descs'] = table_desc.get_node('/phrases')
+                reader['idx_descs'] = table_desc.get_node('/indices')
+            
+            assert reader['idx_names'].shape[0] == reader['idx_apis'].shape[0]
+            assert reader['idx_apis'].shape[0] == reader['idx_tokens'].shape[0]
+            if self.f_descs is not None:
+                assert reader['idx_names'].shape[0]==reader['idx_descs'].shape[0]
+            reader['data_len'] = reader['idx_names'].shape[0]
+
+            print("{} entries".format(reader['data_len']))
+            self.reader_dict[pid]=reader
+        else:
+            reader=self.reader_dict[pid]
+
+        len, pos = reader['idx_names'][offset]['length'], reader['idx_names'][offset]['pos']
+        name = reader['names'][pos:pos + len].astype('int64')
         name = self.pad_seq(name, self.name_len)
         
-        len, pos = self.idx_apis[offset]['length'], self.idx_apis[offset]['pos']
-        apiseq = self.apis[pos:pos+len].astype('int64')
+        len, pos = reader['idx_apis'][offset]['length'], reader['idx_apis'][offset]['pos']
+        apiseq = reader['apis'][pos:pos+len].astype('int64')
         apiseq = self.pad_seq(apiseq, self.api_len)
 
-        len, pos = self.idx_tokens[offset]['length'], self.idx_tokens[offset]['pos']
-        tokens = self.tokens[pos:pos+len].astype('int64')
+        len, pos = reader['idx_tokens'][offset]['length'], reader['idx_tokens'][offset]['pos']
+        tokens = reader['tokens'][pos:pos+len].astype('int64')
         tokens = self.pad_seq(tokens, self.tok_len)
 
-        if self.training:
-            len, pos = self.idx_descs[offset]['length'], self.idx_descs[offset]['pos']
-            good_desc = self.descs[pos:pos+len].astype('int64')
+        if reader['training']:
+            len, pos = reader['idx_descs'][offset]['length'], reader['idx_descs'][offset]['pos']
+            good_desc = reader['descs'][pos:pos+len].astype('int64')
             good_desc = self.pad_seq(good_desc, self.desc_len)
 
-            rand_offset=random.randint(0, self.data_len-1)
-            len, pos = self.idx_descs[rand_offset]['length'], self.idx_descs[rand_offset]['pos']
-            bad_desc = self.descs[pos:pos+len].astype('int64')
+            rand_offset=random.randint(0, reader['data_len']-1)
+            len, pos = reader['idx_descs'][rand_offset]['length'], reader['idx_descs'][rand_offset]['pos']
+            bad_desc = reader['descs'][pos:pos+len].astype('int64')
             bad_desc = self.pad_seq(bad_desc, self.desc_len)
 
             return name, apiseq, tokens, good_desc, bad_desc
@@ -87,6 +106,10 @@ class CodeSearchDataset(data.Dataset):
             return name, apiseq, tokens
         
     def __len__(self):
+        if self.data_len == -1:
+            table_name = tables.open_file(self.data_dir+self.f_name)
+            idx_names = table_name.get_node('/indices')
+            self.data_len = idx_names.shape[0]
         return self.data_len
 
 def load_dict(filename):
