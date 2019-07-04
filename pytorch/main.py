@@ -73,10 +73,9 @@ class CodeSearcher:
         assert os.path.exists(self.path+'models/epo%d.h5'%epoch), 'Weights at epoch %d not found' % epoch
         model.load_state_dict(torch.load(self.path+'models/epo%d.h5' % epoch))
         
-        
 
     ##### Training #####
-    def train(self, model):
+    def train(self, model, reloadid):
         model.train()
         
         log_every = self.conf['log_every']
@@ -84,19 +83,19 @@ class CodeSearcher:
         save_every = self.conf['save_every']
         batch_size = self.conf['batch_size']
         nb_epoch = self.conf['nb_epoch']
-        
+
         train_set = CodeSearchDataset(self.path,
                                       self.conf['train_name'],self.conf['name_len'],
                                       self.conf['train_api'],self.conf['api_len'],
                                       self.conf['train_tokens'],self.conf['tokens_len'],
                                       self.conf['train_desc'],self.conf['desc_len'])
-        
-        data_loader = torch.utils.data.DataLoader(dataset=train_set, batch_size=self.conf['batch_size'], 
-                                           shuffle=True, drop_last=True, num_workers=8)
 
+        data_loader = torch.utils.data.DataLoader(dataset=train_set, batch_size=self.conf['batch_size'],
+                                           shuffle=True, drop_last=True, num_workers=8)
+        
         val_loss = {'loss': 1., 'epoch': 0}
 
-        for epoch in range(self.conf['reload']+1, nb_epoch):          
+        for epoch in range(reloadid+1, nb_epoch):          
             itr = 1
             losses=[]
             for names, apis, toks, good_descs, bad_descs in data_loader:
@@ -110,13 +109,14 @@ class CodeSearcher:
                     logger.info('epo:[%d/%d] itr:%d/%d Loss=%.5f'%(epoch, nb_epoch, itr, len(data_loader), np.mean(losses)))
                     losses=[]
                 itr = itr + 1    
-            
+            self.save_model(model, epoch)
+            break 
       #      if epoch and epoch % valid_every == 0:
       #          logger.info("validating..")
       #          acc1, mrr, map, ndcg = self.eval(model,1000,1)              
                         
-            if epoch and epoch % save_every == 0:
-                self.save_model(model, epoch)
+           # if epoch and epoch % save_every == 0:
+           #     self.save_model(model, epoch)
 
     ##### Evaluation #####
     def eval(self, model, poolsize, K):
@@ -266,6 +266,7 @@ def parse_args():
                         " for a code snippet or a natural language description with a trained model.")
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
     parser.add_argument("--verbose",action="store_true", default=True, help="Be verbose")
+    parser.add_argument("--reloadid", type=int, default=-1)
     return parser.parse_args()
 
 
@@ -279,15 +280,15 @@ if __name__ == '__main__':
     ##### Define model ######
     logger.info('Build Model')
     model = getattr(models, args.model)(conf)#initialize the model
-    if conf['reload']>0:
-        searcher.load_model(model, conf['reload'])
+    if args.reloadid>=0:
+        searcher.load_model(model, args.reloadid)
         
     model = model.to(device)
     
     optimizer = optim.Adam(model.parameters(), lr=conf['lr'])
     
     if args.mode=='train':  
-        searcher.train(model)
+        searcher.train(model,args.reloadid)
         
     elif args.mode=='eval':
         # evaluate for a particular epoch
